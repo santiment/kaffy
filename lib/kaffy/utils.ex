@@ -255,7 +255,7 @@ defmodule Kaffy.Utils do
   def get_assigned_value_or_default(resource, function, default, params \\ [], add_schema \\ true) do
     admin = resource[:admin]
     schema = resource[:schema]
-    arguments = if add_schema, do: [schema] ++ params, else: params
+    arguments = if add_schema, do: [resource] ++ params, else: params
 
     case !is_nil(admin) && has_function?(admin, function) do
       true -> apply(admin, function, arguments)
