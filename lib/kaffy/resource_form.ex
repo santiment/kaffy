@@ -62,6 +62,9 @@ defmodule Kaffy.ResourceForm do
         select(form, field, choices, class: "custom-select")
 
       true ->
+        custom_opts = options[:opts] || []
+        opts = Keyword.merge(opts, custom_opts)
+
         build_html_input(
           changeset.data,
           form,
