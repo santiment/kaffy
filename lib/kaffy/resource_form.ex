@@ -29,7 +29,7 @@ defmodule Kaffy.ResourceForm do
         )
 
       true ->
-        build_html_input(resource[:schema], form, field, type, [])
+        build_html_input(resource[:schema], form, {field, options}, type, [])
     end
   end
 
@@ -68,16 +68,26 @@ defmodule Kaffy.ResourceForm do
         select(form, field, choices, class: "custom-select")
 
       true ->
-        build_html_input(changeset.data, form, field, type, opts, permission == :readonly)
+        custom_opts = options[:opts] || []
+        opts = Keyword.merge(opts, custom_opts)
+
+        build_html_input(
+          changeset.data,
+          form,
+          {field, options},
+          type,
+          opts,
+          permission == :readonly
+        )
     end
   end
 
-  def form_field(changeset, form, field, opts) do
+  def form_field(changeset, form, {field, options}, opts) do
     type = Kaffy.ResourceSchema.field_type(changeset.data.__struct__, field)
-    build_html_input(changeset.data, form, field, type, opts)
+    build_html_input(changeset.data, form, {field, options}, type, opts)
   end
 
-  defp build_html_input(schema, form, field, type, opts, readonly \\ false) do
+  defp build_html_input(schema, form, {field, options}, type, opts, readonly \\ false) do
     data = schema
     {conn, opts} = Keyword.pop(opts, :conn)
     opts = Keyword.put(opts, :readonly, readonly)
@@ -97,7 +107,7 @@ defmodule Kaffy.ResourceForm do
                 [
                   [
                     form_label(fp, f),
-                    form_field(embed_changeset, fp, f, class: "form-control")
+                    form_field(embed_changeset, fp, {f, options}, class: "form-control")
                   ]
                   | all
                 ]
@@ -145,7 +155,7 @@ defmodule Kaffy.ResourceForm do
         [
           {:safe, ~s(<div class="custom-control custom-checkbox">)},
           checkbox(form, field, checkbox_opts),
-          label(form, field, label_opts),
+          label(form, field, form_label_string({field, options}), label_opts),
           {:safe, "</div>"}
         ]
 
@@ -156,7 +166,7 @@ defmodule Kaffy.ResourceForm do
         [
           {:safe, ~s(<div class="custom-control custom-switch">)},
           checkbox(form, field, checkbox_opts),
-          label(form, field, label_opts),
+          label(form, field, form_label_string({field, options}), label_opts),
           {:safe, "</div>"}
         ]
 
@@ -170,6 +180,18 @@ defmodule Kaffy.ResourceForm do
           end
 
         textarea(form, field, [value: value, rows: 4, placeholder: "JSON Content"] ++ opts)
+
+      {:parameterized, Ecto.Enum, %{values: values}} ->
+        values = Enum.map(values, &to_string/1)
+        value = Map.get(data, field, nil)
+
+        select(form, field, values, [value: value] ++ opts)
+
+      {:array, {:parameterized, Ecto.Enum, %{values: values}}} ->
+        values = Enum.map(values, &to_string/1)
+        value = Map.get(data, field, nil)
+
+        multiple_select(form, field, values, [value: value] ++ opts)
 
       {:array, _} ->
         value =
@@ -341,8 +363,14 @@ defmodule Kaffy.ResourceForm do
       nil ->
         {nil, ""}
 
+      # # In case of field is a embedded schema
+      %{} ->
+        {nil, ""}
+
       messages ->
-        error_msg = Kaffy.ResourceAdmin.humanize_term(field) <> " " <> Enum.join(messages, ", ") <> "!"
+        error_msg =
+          Kaffy.ResourceAdmin.humanize_term(field) <> " " <> Enum.join(messages, ", ") <> "!"
+
         {error_msg, "is-invalid"}
     end
   end
@@ -350,10 +378,18 @@ defmodule Kaffy.ResourceForm do
   defp build_error_messages(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
       Enum.reduce(opts, msg, fn {key, value}, acc ->
-        String.replace(acc, "%{#{key}}", to_string(value))
+        String.replace(acc, "%{#{key}}", build_changeset_value(value))
       end)
     end)
   end
+
+  defp build_changeset_value(value) when is_tuple(value),
+    do: value |> Tuple.to_list() |> Enum.join(", ")
+
+  defp build_changeset_value(value) when is_list(value),
+    do: value |> Enum.join(", ")
+
+  defp build_changeset_value(value), do: to_string(value)
 
   def kaffy_input(conn, changeset, form, field, options) do
     ft = Kaffy.ResourceSchema.field_type(changeset.data.__struct__, field)

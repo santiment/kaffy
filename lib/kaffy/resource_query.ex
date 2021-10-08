@@ -25,11 +25,17 @@ defmodule Kaffy.ResourceQuery do
         current_offset
       )
 
-    custom_query = Kaffy.ResourceAdmin.custom_index_query(conn, resource, paged)
-    current_page = Kaffy.Utils.repo().all(custom_query)
+    {current_page, opts} =
+      case Kaffy.ResourceAdmin.custom_index_query(conn, resource, paged) do
+        {custom_query, opts} ->
+          {Kaffy.Utils.repo().all(custom_query, opts), opts}
+
+        custom_query ->
+          {Kaffy.Utils.repo().all(custom_query), []}
+      end
 
     do_cache = if search == "" and Enum.empty?(filtered_fields), do: true, else: false
-    all_count = cached_total_count(schema, do_cache, all)
+    all_count = cached_total_count(schema, do_cache, all, opts)
     {all_count, current_page}
   end
 
@@ -48,8 +54,10 @@ defmodule Kaffy.ResourceQuery do
     schema = resource[:schema]
     id_filter = Kaffy.ResourceAdmin.deserialize_id(resource, id)
     query = from(s in schema, where: ^id_filter)
-    custom_query = Kaffy.ResourceAdmin.custom_show_query(conn, resource, query)
-    Kaffy.Utils.repo().one(custom_query)
+    case Kaffy.ResourceAdmin.custom_show_query(conn, resource, query) do
+      {custom_query, opts} -> Kaffy.Utils.repo().one(custom_query, opts)
+      custom_query -> Kaffy.Utils.repo().one(custom_query)
+    end
   end
 
   def fetch_list(_, [""]), do: []
@@ -61,10 +69,12 @@ defmodule Kaffy.ResourceQuery do
     |> Kaffy.Utils.repo().all()
   end
 
-  def total_count(schema, do_cache, query) do
+  def total_count(schema, do_cache, query, opts \\ [])
+
+  def total_count(schema, do_cache, query, opts) do
     result =
       from(s in query, select: fragment("count(*)"))
-      |> Kaffy.Utils.repo().one()
+      |> Kaffy.Utils.repo().one(opts)
 
     if do_cache and result > 100_000 do
       Kaffy.Cache.Client.add_cache(schema, "count", result, 600)
@@ -73,10 +83,12 @@ defmodule Kaffy.ResourceQuery do
     result
   end
 
-  def cached_total_count(schema, false, query), do: total_count(schema, false, query)
+  def cached_total_count(schema, do_cache, query, opts \\ [])
 
-  def cached_total_count(schema, do_cache, query) do
-    Kaffy.Cache.Client.get_cache(schema, "count") || total_count(schema, do_cache, query)
+  def cached_total_count(schema, false, query, opts), do: total_count(schema, false, query, opts)
+
+  def cached_total_count(schema, do_cache, query, opts) do
+    Kaffy.Cache.Client.get_cache(schema, "count") || total_count(schema, do_cache, query, opts)
   end
 
   defp get_filter_fields(params, resource) do
@@ -103,7 +115,7 @@ defmodule Kaffy.ResourceQuery do
 
     query =
       cond do
-        (is_nil(search_fields) || Enum.empty?(search_fields)) && search == "" ->
+        is_nil(search_fields) || Enum.empty?(search_fields) || search == "" ->
           query
 
         true ->
@@ -119,7 +131,9 @@ defmodule Kaffy.ResourceQuery do
               query = from(s in q, join: a in assoc(s, ^association))
 
               Enum.reduce(fields, query, fn f, current_query ->
-                from([..., r] in current_query, or_where: ilike(type(field(r, ^f), :string), ^term))
+                from([..., r] in current_query,
+                  or_where: ilike(type(field(r, ^f), :string), ^term)
+                )
               end)
 
             f, q ->

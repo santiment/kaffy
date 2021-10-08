@@ -21,7 +21,7 @@ defmodule Kaffy.ResourceAdmin do
 
   Both options can be a string or an anonymous function.
 
-  If a fuction is provided, the current entry is passed to it.
+  If a function is provided, the current entry is passed to it.
 
   If index/1 is not defined, Kaffy will return all the fields of the schema and their default values.
 
@@ -78,13 +78,14 @@ defmodule Kaffy.ResourceAdmin do
   end
   ```
   """
-  def form_fields(resource) do
+  def form_fields(resource, entry \\ []) do
     schema = resource[:schema]
 
     Utils.get_assigned_value_or_default(
       resource,
       :form_fields,
-      ResourceSchema.form_fields(schema)
+      ResourceSchema.form_fields(schema),
+      List.wrap(entry)
     )
     |> set_default_field_options(schema)
   end
@@ -185,10 +186,7 @@ defmodule Kaffy.ResourceAdmin do
 
         false ->
           cast_fields = Kaffy.ResourceSchema.cast_fields(schema) |> Keyword.keys()
-
-          schema_struct
-          |> Ecto.Changeset.cast(changes, cast_fields)
-          |> Ecto.Changeset.change(changes)
+          Ecto.Changeset.cast(schema_struct, changes, cast_fields)
       end
 
     Utils.get_assigned_value_or_default(
@@ -226,12 +224,7 @@ defmodule Kaffy.ResourceAdmin do
 
         false ->
           cast_fields = Kaffy.ResourceSchema.cast_fields(schema) |> Keyword.keys()
-
-          entry
-          |> Ecto.Changeset.cast(changes, cast_fields)
-          |> Ecto.Changeset.change(changes)
-
-          Ecto.Changeset.change(entry, changes)
+          Ecto.Changeset.cast(entry, changes, cast_fields)
       end
 
     Utils.get_assigned_value_or_default(
