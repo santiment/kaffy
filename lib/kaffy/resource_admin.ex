@@ -2,6 +2,8 @@ defmodule Kaffy.ResourceAdmin do
   alias Kaffy.ResourceSchema
   alias Kaffy.Utils
 
+  @default_id_separator "."
+
   @moduledoc """
   ResourceAdmin modules should be created for every schema you want to customize/configure in Kaffy.
 
@@ -76,13 +78,14 @@ defmodule Kaffy.ResourceAdmin do
   end
   ```
   """
-  def form_fields(resource) do
+  def form_fields(resource, entry \\ []) do
     schema = resource[:schema]
 
     Utils.get_assigned_value_or_default(
       resource,
       :form_fields,
-      ResourceSchema.form_fields(schema)
+      ResourceSchema.form_fields(schema),
+      List.wrap(entry)
     )
     |> set_default_field_options(schema)
   end
@@ -119,7 +122,7 @@ defmodule Kaffy.ResourceAdmin do
   @doc """
   `ordering/1` takes a schema and returns how the entries should be ordered.
 
-  If `ordering/1` is not defined, Kaffy will return `[desc: :id]`.
+  If `ordering/1` is not defined, Kaffy will return `[desc: primary_key]`, or the first field of the primary key, if it's a composite.
 
   Example:
 
@@ -130,7 +133,10 @@ defmodule Kaffy.ResourceAdmin do
   ```
   """
   def ordering(resource) do
-    Utils.get_assigned_value_or_default(resource, :ordering, desc: :id)
+    schema = resource[:schema]
+    [order_key | _] = ResourceSchema.primary_keys(schema)
+
+    Utils.get_assigned_value_or_default(resource, :ordering, desc: order_key)
   end
 
   @doc """
@@ -283,6 +289,52 @@ defmodule Kaffy.ResourceAdmin do
   def plural_name(resource) do
     default = singular_name(resource) <> "s"
     Utils.get_assigned_value_or_default(resource, :plural_name, default)
+  end
+
+  @doc """
+  `serialize_id/2` takes a schema and record and must return a string to be used in the URL and form values.
+
+  If `serialize_id/2` is not defined, Kaffy will concatenate multiple primary keys with `"."` as a separator.
+
+  Example:
+
+  ```elixir
+  def serialize_id(_schema, record) do
+    Enum.join([record.post_id, record.tag_id], ".")
+  end
+  ```
+  """
+  def serialize_id(resource, entry) do
+    schema = resource[:schema]
+    default = schema
+      |> ResourceSchema.primary_keys()
+      |> Enum.map_join(@default_id_separator, &Map.get(entry, &1))
+
+    Utils.get_assigned_value_or_default(resource, :serialize_id, default, [entry])
+  end
+
+  @doc """
+  `deserialize_id/2` takes a schema and serialized id and must return a complete
+  keyword list in the form of [{:primary_key, value}, ...].
+
+  If `deserialize_id/2` is not defined, Kaffy will split multiple primary keys with `"."` as a separator.
+
+  Example:
+
+  ```elixir
+  def serialize_id(_schema, serialized_id) do
+    Enum.zip([:post_id, :tag_id], String.split(serialized_id, "."))
+  end
+  ```
+  """
+  def deserialize_id(resource, id) do
+    schema = resource[:schema]
+    id_list = String.split(id, @default_id_separator)
+    default = schema
+      |> ResourceSchema.primary_keys()
+      |> Enum.zip(id_list)
+
+    Utils.get_assigned_value_or_default(resource, :deserialize_id, default, [id])
   end
 
   def resource_actions(resource, conn) do
